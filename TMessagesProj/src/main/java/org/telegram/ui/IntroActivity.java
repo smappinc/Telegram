@@ -8,6 +8,8 @@
 
 package org.telegram.ui;
 
+import static com.google.android.exoplayer2.ExoPlayerLibraryInfo.TAG;
+
 import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -26,6 +28,8 @@ import android.os.Looper;
 import android.os.Parcelable;
 import androidx.viewpager.widget.PagerAdapter;
 import androidx.viewpager.widget.ViewPager;
+
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.TextureView;
@@ -36,6 +40,13 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.ScrollView;
 import android.widget.TextView;
+
+import com.facebook.ads.AudienceNetworkAds;
+import com.mopub.common.MoPub;
+import com.mopub.common.SdkConfiguration;
+import com.mopub.common.SdkInitializationListener;
+import com.mopub.mobileads.MoPubErrorCode;
+import com.mopub.mobileads.MoPubInterstitial;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildVars;
@@ -86,6 +97,9 @@ public class IntroActivity extends Activity implements NotificationCenter.Notifi
     private int startDragX;
     private boolean destroyed;
 
+    //Mopub
+    private MoPubInterstitial mInterstitial;
+
     private LocaleController.LocaleInfo localeInfo;
 
     @Override
@@ -93,6 +107,10 @@ public class IntroActivity extends Activity implements NotificationCenter.Notifi
         setTheme(R.style.Theme_TMessages);
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        AudienceNetworkAds.initialize(this);
+        final SdkConfiguration.Builder Sdkconfiguration = new SdkConfiguration.Builder("622149c1a1964d3080ffcc99cc4addb7");
+        MoPub.initializeSdk(this,Sdkconfiguration.build(),initSdkListener());
 
         SharedPreferences preferences = MessagesController.getGlobalMainSettings();
         preferences.edit().putLong("intro_crashed_time", System.currentTimeMillis()).commit();
@@ -256,16 +274,59 @@ public class IntroActivity extends Activity implements NotificationCenter.Notifi
         startMessagingButton.setPadding(AndroidUtilities.dp(34), 0, AndroidUtilities.dp(34), 0);
         frameLayout.addView(startMessagingButton, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 42, Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM, 36, 0, 36, 76));
         startMessagingButton.setOnClickListener(view -> {
-            if (startPressed) {
-                return;
+
+            // If a interstitial is ready, show it
+            if (mInterstitial.isReady()){
+                mInterstitial.show();
+
+                mInterstitial.setInterstitialAdListener(new MoPubInterstitial.InterstitialAdListener() {
+                    @Override
+                    public void onInterstitialLoaded(MoPubInterstitial moPubInterstitial) {
+                        Log.i(TAG, "Interstitial AdLoaded");
+                    }
+
+                    @Override
+                    public void onInterstitialFailed(MoPubInterstitial moPubInterstitial, MoPubErrorCode moPubErrorCode) {
+                        Log.i(TAG, moPubErrorCode.toString());
+                    }
+
+                    @Override
+                    public void onInterstitialShown(MoPubInterstitial moPubInterstitial) {
+                        Log.i(TAG, "Interstitial Ad Shown");
+                    }
+
+                    @Override
+                    public void onInterstitialClicked(MoPubInterstitial moPubInterstitial) {
+                        Log.i(TAG, "Interstitial Ad Clicked");
+                    }
+
+                    @Override
+                    public void onInterstitialDismissed(MoPubInterstitial moPubInterstitial) {
+                        if (startPressed) {
+                            return;
+                        }
+                        startPressed = true;
+                        Intent intent2 = new Intent(IntroActivity.this, LaunchActivity.class);
+                        intent2.putExtra("fromIntro", true);
+                        startActivity(intent2);
+                        destroyed = true;
+                        finish();
+                    }
+                });
+            } else {
+
+                if (startPressed) {
+                    return;
+                }
+                startPressed = true;
+                Intent intent2 = new Intent(IntroActivity.this, LaunchActivity.class);
+                intent2.putExtra("fromIntro", true);
+                startActivity(intent2);
+                destroyed = true;
+                finish();
+
             }
-            startPressed = true;
-            Intent intent2 = new Intent(IntroActivity.this, LaunchActivity.class);
-            intent2.putExtra("fromIntro", true);
-            startActivity(intent2);
-            destroyed = true;
-            finish();
-        });
+        }); //END
 
         bottomPages = new BottomPagesView(this, viewPager, 6);
         frameLayout.addView(bottomPages, LayoutHelper.createFrame(66, 5, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, 350, 0, 0));
@@ -318,6 +379,41 @@ public class IntroActivity extends Activity implements NotificationCenter.Notifi
 
         AndroidUtilities.handleProxyIntent(this, getIntent());
         AndroidUtilities.startAppCenter(this);
+    }
+
+    private SdkInitializationListener initSdkListener() {
+        return  new  SdkInitializationListener(){
+
+            @Override
+            public void onInitializationFinished() {
+//                moPubView.setAdUnitId("5dc57efd534845f8b5f55e6bf307ed6d"); // Enter your Ad Unit ID from www.mopub.com
+//                moPubView.loadAd();
+                loadIntersitialMopubAds();
+
+            }
+        };
+    }
+
+    private void loadIntersitialMopubAds(){
+
+        mInterstitial = new MoPubInterstitial(this, "622149c1a1964d3080ffcc99cc4addb7");
+        mInterstitial.load();
+        // Remember that "this" refers to your current activity.
+        mInterstitial.setInterstitialAdListener(new MoPubInterstitial.InterstitialAdListener() {
+            @Override public void onInterstitialLoaded(MoPubInterstitial moPubInterstitial) { Log.i(TAG, "Ad-Loaded"); }
+
+            @Override public void onInterstitialFailed(MoPubInterstitial moPubInterstitial, MoPubErrorCode moPubErrorCode) { Log.i(TAG, moPubErrorCode.toString()); }
+
+            @Override public void onInterstitialShown(MoPubInterstitial moPubInterstitial) { Log.i(TAG, "Shown Fullscreen Ad."); }
+
+            @Override public void onInterstitialClicked(MoPubInterstitial moPubInterstitial) { Log.i(TAG, "Clicked Fullscreen Ad"); }
+
+            @Override public void onInterstitialDismissed(MoPubInterstitial moPubInterstitial) { Log.i(TAG, "Dismissed"); }
+
+            //To-DO
+
+        });
+
     }
 
     @Override
@@ -614,7 +710,7 @@ public class IntroActivity extends Activity implements NotificationCenter.Notifi
             loadTexture(R.drawable.intro_powerful_star, 18);
             loadTexture(R.drawable.intro_private_door, 19);
             loadTexture(R.drawable.intro_private_screw, 20);
-            loadTexture(R.drawable.intro_tg_plane, 21);
+            loadTexture(R.drawable.notification, 21);
             loadTexture(R.drawable.intro_tg_sphere, 22);
 
             Intro.setTelegramTextures(textures[22], textures[21]);

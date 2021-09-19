@@ -8,6 +8,8 @@
 
 package org.telegram.ui;
 
+import static com.google.android.exoplayer2.ExoPlayerLibraryInfo.TAG;
+
 import android.Manifest;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
@@ -78,6 +80,8 @@ import androidx.recyclerview.widget.RecyclerView;
 import androidx.viewpager.widget.ViewPager;
 
 import com.google.android.exoplayer2.util.Log;
+import com.mopub.mobileads.MoPubErrorCode;
+import com.mopub.mobileads.MoPubInterstitial;
 
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
@@ -406,6 +410,9 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
     private float filterTabsMoveFrom;
     private float tabsYOffset;
     private float scrollAdditionalOffset;
+
+    //Mopub
+    private MoPubInterstitial mInterstitial;
 
     private int debugLastUpdateAction = -1;
 
@@ -4185,6 +4192,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
 
     @Override
     public boolean onBackPressed() {
+
         if (scrimPopupWindow != null) {
             scrimPopupWindow.dismiss();
             return false;
@@ -4209,6 +4217,7 @@ public class DialogsActivity extends BaseFragment implements NotificationCenter.
         }
         return super.onBackPressed();
     }
+
 
     @Override
     protected void onBecomeFullyHidden() {

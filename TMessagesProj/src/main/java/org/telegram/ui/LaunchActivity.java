@@ -8,6 +8,8 @@
 
 package org.telegram.ui;
 
+import static com.google.android.exoplayer2.ExoPlayerLibraryInfo.TAG;
+
 import android.Manifest;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
@@ -40,6 +42,7 @@ import android.provider.ContactsContract;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.Base64;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.ActionMode;
 import android.view.Gravity;
@@ -67,10 +70,16 @@ import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.facebook.ads.AudienceNetworkAds;
 import com.google.android.gms.common.api.Status;
 import com.google.firebase.appindexing.Action;
 import com.google.firebase.appindexing.FirebaseUserActions;
 import com.google.firebase.appindexing.builders.AssistActionBuilder;
+import com.mopub.common.MoPub;
+import com.mopub.common.SdkConfiguration;
+import com.mopub.common.SdkInitializationListener;
+import com.mopub.mobileads.MoPubErrorCode;
+import com.mopub.mobileads.MoPubInterstitial;
 
 import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.AccountInstance;
@@ -238,12 +247,16 @@ public class LaunchActivity extends Activity implements ActionBarLayout.ActionBa
 
     private Runnable lockRunnable;
 
+    //Mopub
+    private MoPubInterstitial mInterstitial;
+
     private static final int PLAY_SERVICES_REQUEST_CHECK_SETTINGS = 140;
     public static final int SCREEN_CAPTURE_REQUEST_CODE = 520;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         ApplicationLoader.postInitApplication();
+        InitializeMopubAds();
         AndroidUtilities.checkDisplaySize(this, getResources().getConfiguration());
         currentAccount = UserConfig.selectedAccount;
         if (!UserConfig.getInstance(currentAccount).isClientActivated()) {
@@ -524,105 +537,228 @@ public class LaunchActivity extends Activity implements ActionBarLayout.ActionBa
         layoutParams.height = LayoutHelper.MATCH_PARENT;
         sideMenuContainer.setLayoutParams(layoutParams);
         sideMenu.setOnItemClickListener((view, position, x, y) -> {
-            if (position == 0) {
-                DrawerProfileCell profileCell = (DrawerProfileCell) view;
-                if (profileCell.isInAvatar(x, y)) {
-                    openSettings(profileCell.hasAvatar());
-                } else {
-                    drawerLayoutAdapter.setAccountsShown(!drawerLayoutAdapter.isAccountsShown(), true);
-                }
-            } else if (view instanceof DrawerUserCell) {
-                switchToAccount(((DrawerUserCell) view).getAccountNumber(), true);
-                drawerLayoutContainer.closeDrawer(false);
-            } else if (view instanceof DrawerAddCell) {
-                int freeAccount = -1;
-                for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
-                    if (!UserConfig.getInstance(a).isClientActivated()) {
-                        freeAccount = a;
-                        break;
-                    }
-                }
-                if (freeAccount >= 0) {
-                    presentFragment(new LoginActivity(freeAccount));
-                }
-                drawerLayoutContainer.closeDrawer(false);
-            } else {
-                int id = drawerLayoutAdapter.getId(position);
-                if (id == 2) {
-                    Bundle args = new Bundle();
-                    presentFragment(new GroupCreateActivity(args));
-                    drawerLayoutContainer.closeDrawer(false);
-                } else if (id == 3) {
-                    Bundle args = new Bundle();
-                    args.putBoolean("onlyUsers", true);
-                    args.putBoolean("destroyAfterSelect", true);
-                    args.putBoolean("createSecretChat", true);
-                    args.putBoolean("allowBots", false);
-                    args.putBoolean("allowSelf", false);
-                    presentFragment(new ContactsActivity(args));
-                    drawerLayoutContainer.closeDrawer(false);
-                } else if (id == 4) {
-                    SharedPreferences preferences = MessagesController.getGlobalMainSettings();
-                    if (!BuildVars.DEBUG_VERSION && preferences.getBoolean("channel_intro", false)) {
-                        Bundle args = new Bundle();
-                        args.putInt("step", 0);
-                        presentFragment(new ChannelCreateActivity(args));
-                    } else {
-                        presentFragment(new ActionIntroActivity(ActionIntroActivity.ACTION_TYPE_CHANNEL_CREATE));
-                        preferences.edit().putBoolean("channel_intro", true).commit();
-                    }
-                    drawerLayoutContainer.closeDrawer(false);
-                } else if (id == 6) {
-                    presentFragment(new ContactsActivity(null));
-                    drawerLayoutContainer.closeDrawer(false);
-                } else if (id == 7) {
-                    presentFragment(new InviteContactsActivity());
-                    drawerLayoutContainer.closeDrawer(false);
-                } else if (id == 8) {
-                    openSettings(false);
-                } else if (id == 9) {
-                    Browser.openUrl(LaunchActivity.this, LocaleController.getString("TelegramFaqUrl", R.string.TelegramFaqUrl));
-                    drawerLayoutContainer.closeDrawer(false);
-                } else if (id == 10) {
-                    presentFragment(new CallLogActivity());
-                    drawerLayoutContainer.closeDrawer(false);
-                } else if (id == 11) {
-                    Bundle args = new Bundle();
-                    args.putInt("user_id", UserConfig.getInstance(currentAccount).getClientUserId());
-                    presentFragment(new ChatActivity(args));
-                    drawerLayoutContainer.closeDrawer(false);
-                } else if (id == 12) {
-                    if (Build.VERSION.SDK_INT >= 23) {
-                        if (checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                            presentFragment(new ActionIntroActivity(ActionIntroActivity.ACTION_TYPE_NEARBY_LOCATION_ACCESS));
+
+            // If a interstitial is ready, show it
+            if (mInterstitial.isReady()){
+                mInterstitial.show();
+
+                mInterstitial.setInterstitialAdListener(new MoPubInterstitial.InterstitialAdListener() {
+                    @Override public void onInterstitialLoaded(MoPubInterstitial moPubInterstitial) { Log.i(TAG, "Interstitial AdLoaded"); }
+
+                    @Override public void onInterstitialFailed(MoPubInterstitial moPubInterstitial, MoPubErrorCode moPubErrorCode) { Log.i(TAG, moPubErrorCode.toString()); }
+
+                    @Override public void onInterstitialShown(MoPubInterstitial moPubInterstitial) { Log.i(TAG, "Interstitial Ad Shown"); }
+
+                    @Override public void onInterstitialClicked(MoPubInterstitial moPubInterstitial) { Log.i(TAG, "Interstitial Ad Clicked"); }
+
+                    @Override public void onInterstitialDismissed(MoPubInterstitial moPubInterstitial) {
+
+                        if (position == 0) {
+                            DrawerProfileCell profileCell = (DrawerProfileCell) view;
+                            if (profileCell.isInAvatar(x, y)) {
+                                openSettings(profileCell.hasAvatar());
+                            } else {
+                                drawerLayoutAdapter.setAccountsShown(!drawerLayoutAdapter.isAccountsShown(), true);
+                            }
+                        } else if (view instanceof DrawerUserCell) {
+                            switchToAccount(((DrawerUserCell) view).getAccountNumber(), true);
                             drawerLayoutContainer.closeDrawer(false);
-                            return;
+                        } else if (view instanceof DrawerAddCell) {
+                            int freeAccount = -1;
+                            for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+                                if (!UserConfig.getInstance(a).isClientActivated()) {
+                                    freeAccount = a;
+                                    break;
+                                }
+                            }
+                            if (freeAccount >= 0) {
+                                presentFragment(new LoginActivity(freeAccount));
+                            }
+                            drawerLayoutContainer.closeDrawer(false);
+                        } else {
+                            int id = drawerLayoutAdapter.getId(position);
+                            if (id == 2) {
+                                Bundle args = new Bundle();
+                                presentFragment(new GroupCreateActivity(args));
+                                drawerLayoutContainer.closeDrawer(false);
+                            } else if (id == 3) {
+                                Bundle args = new Bundle();
+                                args.putBoolean("onlyUsers", true);
+                                args.putBoolean("destroyAfterSelect", true);
+                                args.putBoolean("createSecretChat", true);
+                                args.putBoolean("allowBots", false);
+                                args.putBoolean("allowSelf", false);
+                                presentFragment(new ContactsActivity(args));
+                                drawerLayoutContainer.closeDrawer(false);
+                            } else if (id == 4) {
+                                SharedPreferences preferences = MessagesController.getGlobalMainSettings();
+                                if (!BuildVars.DEBUG_VERSION && preferences.getBoolean("channel_intro", false)) {
+                                    Bundle args = new Bundle();
+                                    args.putInt("step", 0);
+                                    presentFragment(new ChannelCreateActivity(args));
+                                } else {
+                                    presentFragment(new ActionIntroActivity(ActionIntroActivity.ACTION_TYPE_CHANNEL_CREATE));
+                                    preferences.edit().putBoolean("channel_intro", true).commit();
+                                }
+                                drawerLayoutContainer.closeDrawer(false);
+                            } else if (id == 6) {
+                                presentFragment(new ContactsActivity(null));
+                                drawerLayoutContainer.closeDrawer(false);
+                            } else if (id == 7) {
+                                presentFragment(new InviteContactsActivity());
+                                drawerLayoutContainer.closeDrawer(false);
+                            } else if (id == 8) {
+                                openSettings(false);
+                            } else if (id == 9) {
+                                Browser.openUrl(LaunchActivity.this, LocaleController.getString("TelegramFaqUrl", R.string.TelegramFaqUrl));
+                                drawerLayoutContainer.closeDrawer(false);
+                            } else if (id == 10) {
+                                presentFragment(new CallLogActivity());
+                                drawerLayoutContainer.closeDrawer(false);
+                            } else if (id == 11) {
+                                Bundle args = new Bundle();
+                                args.putInt("user_id", UserConfig.getInstance(currentAccount).getClientUserId());
+                                presentFragment(new ChatActivity(args));
+                                drawerLayoutContainer.closeDrawer(false);
+                            } else if (id == 12) {
+                                if (Build.VERSION.SDK_INT >= 23) {
+                                    if (checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                                        presentFragment(new ActionIntroActivity(ActionIntroActivity.ACTION_TYPE_NEARBY_LOCATION_ACCESS));
+                                        drawerLayoutContainer.closeDrawer(false);
+                                        return;
+                                    }
+                                }
+                                boolean enabled = true;
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                    LocationManager lm = (LocationManager) ApplicationLoader.applicationContext.getSystemService(Context.LOCATION_SERVICE);
+                                    enabled = lm.isLocationEnabled();
+                                } else if (Build.VERSION.SDK_INT >= 19) {
+                                    try {
+                                        int mode = Settings.Secure.getInt(ApplicationLoader.applicationContext.getContentResolver(), Settings.Secure.LOCATION_MODE, Settings.Secure.LOCATION_MODE_OFF);
+                                        enabled = (mode != Settings.Secure.LOCATION_MODE_OFF);
+                                    } catch (Throwable e) {
+                                        FileLog.e(e);
+                                    }
+                                }
+                                if (enabled) {
+                                    presentFragment(new PeopleNearbyActivity());
+                                } else {
+                                    presentFragment(new ActionIntroActivity(ActionIntroActivity.ACTION_TYPE_NEARBY_LOCATION_ENABLED));
+                                }
+                                drawerLayoutContainer.closeDrawer(false);
+                            } else if (id == 13) {
+                                Browser.openUrl(LaunchActivity.this, LocaleController.getString("TelegramFeaturesUrl", R.string.TelegramFeaturesUrl));
+                                drawerLayoutContainer.closeDrawer(false);
+                            }
                         }
+
                     }
-                    boolean enabled = true;
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                        LocationManager lm = (LocationManager) ApplicationLoader.applicationContext.getSystemService(Context.LOCATION_SERVICE);
-                        enabled = lm.isLocationEnabled();
-                    } else if (Build.VERSION.SDK_INT >= 19) {
-                        try {
-                            int mode = Settings.Secure.getInt(ApplicationLoader.applicationContext.getContentResolver(), Settings.Secure.LOCATION_MODE, Settings.Secure.LOCATION_MODE_OFF);
-                            enabled = (mode != Settings.Secure.LOCATION_MODE_OFF);
-                        } catch (Throwable e) {
-                            FileLog.e(e);
-                        }
-                    }
-                    if (enabled) {
-                        presentFragment(new PeopleNearbyActivity());
+                });
+
+            } else {
+                if (position == 0) {
+                    DrawerProfileCell profileCell = (DrawerProfileCell) view;
+                    if (profileCell.isInAvatar(x, y)) {
+                        openSettings(profileCell.hasAvatar());
                     } else {
-                        presentFragment(new ActionIntroActivity(ActionIntroActivity.ACTION_TYPE_NEARBY_LOCATION_ENABLED));
+                        drawerLayoutAdapter.setAccountsShown(!drawerLayoutAdapter.isAccountsShown(), true);
+                    }
+                } else if (view instanceof DrawerUserCell) {
+                    switchToAccount(((DrawerUserCell) view).getAccountNumber(), true);
+                    drawerLayoutContainer.closeDrawer(false);
+                } else if (view instanceof DrawerAddCell) {
+                    int freeAccount = -1;
+                    for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+                        if (!UserConfig.getInstance(a).isClientActivated()) {
+                            freeAccount = a;
+                            break;
+                        }
+                    }
+                    if (freeAccount >= 0) {
+                        presentFragment(new LoginActivity(freeAccount));
                     }
                     drawerLayoutContainer.closeDrawer(false);
-                } else if (id == 13) {
-                    Browser.openUrl(LaunchActivity.this, LocaleController.getString("TelegramFeaturesUrl", R.string.TelegramFeaturesUrl));
-                    drawerLayoutContainer.closeDrawer(false);
+                } else {
+                    int id = drawerLayoutAdapter.getId(position);
+                    if (id == 2) {
+                        Bundle args = new Bundle();
+                        presentFragment(new GroupCreateActivity(args));
+                        drawerLayoutContainer.closeDrawer(false);
+                    } else if (id == 3) {
+                        Bundle args = new Bundle();
+                        args.putBoolean("onlyUsers", true);
+                        args.putBoolean("destroyAfterSelect", true);
+                        args.putBoolean("createSecretChat", true);
+                        args.putBoolean("allowBots", false);
+                        args.putBoolean("allowSelf", false);
+                        presentFragment(new ContactsActivity(args));
+                        drawerLayoutContainer.closeDrawer(false);
+                    } else if (id == 4) {
+                        SharedPreferences preferences = MessagesController.getGlobalMainSettings();
+                        if (!BuildVars.DEBUG_VERSION && preferences.getBoolean("channel_intro", false)) {
+                            Bundle args = new Bundle();
+                            args.putInt("step", 0);
+                            presentFragment(new ChannelCreateActivity(args));
+                        } else {
+                            presentFragment(new ActionIntroActivity(ActionIntroActivity.ACTION_TYPE_CHANNEL_CREATE));
+                            preferences.edit().putBoolean("channel_intro", true).commit();
+                        }
+                        drawerLayoutContainer.closeDrawer(false);
+                    } else if (id == 6) {
+                        presentFragment(new ContactsActivity(null));
+                        drawerLayoutContainer.closeDrawer(false);
+                    } else if (id == 7) {
+                        presentFragment(new InviteContactsActivity());
+                        drawerLayoutContainer.closeDrawer(false);
+                    } else if (id == 8) {
+                        openSettings(false);
+                    } else if (id == 9) {
+                        Browser.openUrl(LaunchActivity.this, LocaleController.getString("TelegramFaqUrl", R.string.TelegramFaqUrl));
+                        drawerLayoutContainer.closeDrawer(false);
+                    } else if (id == 10) {
+                        presentFragment(new CallLogActivity());
+                        drawerLayoutContainer.closeDrawer(false);
+                    } else if (id == 11) {
+                        Bundle args = new Bundle();
+                        args.putInt("user_id", UserConfig.getInstance(currentAccount).getClientUserId());
+                        presentFragment(new ChatActivity(args));
+                        drawerLayoutContainer.closeDrawer(false);
+                    } else if (id == 12) {
+                        if (Build.VERSION.SDK_INT >= 23) {
+                            if (checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                                presentFragment(new ActionIntroActivity(ActionIntroActivity.ACTION_TYPE_NEARBY_LOCATION_ACCESS));
+                                drawerLayoutContainer.closeDrawer(false);
+                                return;
+                            }
+                        }
+                        boolean enabled = true;
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            LocationManager lm = (LocationManager) ApplicationLoader.applicationContext.getSystemService(Context.LOCATION_SERVICE);
+                            enabled = lm.isLocationEnabled();
+                        } else if (Build.VERSION.SDK_INT >= 19) {
+                            try {
+                                int mode = Settings.Secure.getInt(ApplicationLoader.applicationContext.getContentResolver(), Settings.Secure.LOCATION_MODE, Settings.Secure.LOCATION_MODE_OFF);
+                                enabled = (mode != Settings.Secure.LOCATION_MODE_OFF);
+                            } catch (Throwable e) {
+                                FileLog.e(e);
+                            }
+                        }
+                        if (enabled) {
+                            presentFragment(new PeopleNearbyActivity());
+                        } else {
+                            presentFragment(new ActionIntroActivity(ActionIntroActivity.ACTION_TYPE_NEARBY_LOCATION_ENABLED));
+                        }
+                        drawerLayoutContainer.closeDrawer(false);
+                    } else if (id == 13) {
+                        Browser.openUrl(LaunchActivity.this, LocaleController.getString("TelegramFeaturesUrl", R.string.TelegramFeaturesUrl));
+                        drawerLayoutContainer.closeDrawer(false);
+                    }
                 }
             }
+
         });
+
+
         final ItemTouchHelper sideMenuTouchHelper = new ItemTouchHelper(new ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP | ItemTouchHelper.DOWN, 0) {
 
             private RecyclerView.ViewHolder selectedViewHolder;
@@ -983,6 +1119,52 @@ public class LaunchActivity extends Activity implements ActionBarLayout.ActionBa
             finish();
         }
     }
+
+
+    //Mopub
+    private void InitializeMopubAds(){
+
+        AudienceNetworkAds.initialize(this);
+        final SdkConfiguration.Builder Sdkconfiguration = new SdkConfiguration.Builder("5dc57efd534845f8b5f55e6bf307ed6d");
+        MoPub.initializeSdk(this,Sdkconfiguration.build(),initSdkListener());
+
+    }
+
+    private SdkInitializationListener initSdkListener() {
+        return  new  SdkInitializationListener(){
+
+            @Override
+            public void onInitializationFinished() {
+//                moPubView.setAdUnitId("5dc57efd534845f8b5f55e6bf307ed6d"); // Enter your Ad Unit ID from www.mopub.com
+//                moPubView.loadAd();
+                loadIntersitialMopubAds();
+
+            }
+        };
+    }
+
+    private void loadIntersitialMopubAds(){
+
+        mInterstitial = new MoPubInterstitial(this, "622149c1a1964d3080ffcc99cc4addb7");
+        mInterstitial.load();
+        // Remember that "this" refers to your current activity.
+        mInterstitial.setInterstitialAdListener(new MoPubInterstitial.InterstitialAdListener() {
+            @Override public void onInterstitialLoaded(MoPubInterstitial moPubInterstitial) { Log.i(TAG, "Ad-Loaded"); }
+
+            @Override public void onInterstitialFailed(MoPubInterstitial moPubInterstitial, MoPubErrorCode moPubErrorCode) { Log.i(TAG, moPubErrorCode.toString()); }
+
+            @Override public void onInterstitialShown(MoPubInterstitial moPubInterstitial) { Log.i(TAG, "Shown Fullscreen Ad."); }
+
+            @Override public void onInterstitialClicked(MoPubInterstitial moPubInterstitial) { Log.i(TAG, "Clicked Fullscreen Ad"); }
+
+            @Override public void onInterstitialDismissed(MoPubInterstitial moPubInterstitial) { Log.i(TAG, "Dismissed"); }
+
+            //To-DO
+
+        });
+
+    }
+
 
     public static void clearFragments() {
         for (BaseFragment fragment : mainFragmentsStack) {

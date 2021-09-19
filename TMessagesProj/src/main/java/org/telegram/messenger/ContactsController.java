@@ -316,7 +316,7 @@ public class ContactsController extends BaseController {
     public void checkAppAccount() {
         AccountManager am = AccountManager.get(ApplicationLoader.applicationContext);
         try {
-            Account[] accounts = am.getAccountsByType("org.telegram.messenger");
+            Account[] accounts = am.getAccountsByType("com.signalplusmessenger");
             systemAccount = null;
             for (int a = 0; a < accounts.length; a++) {
                 Account acc = accounts[a];
@@ -349,7 +349,7 @@ public class ContactsController extends BaseController {
             readContacts();
             if (systemAccount == null) {
                 try {
-                    systemAccount = new Account("" + getUserConfig().getClientUserId(), "org.telegram.messenger");
+                    systemAccount = new Account("" + getUserConfig().getClientUserId(), "com.signalplusmessenger");
                     am.addAccountExplicitly(systemAccount, "", null);
                 } catch (Exception ignore) {
 
